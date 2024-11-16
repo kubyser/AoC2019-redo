@@ -1,7 +1,3 @@
-from tkinter.tix import IMMEDIATE
-from wsgiref.validate import validator
-
-
 class IntCode:
     NUM_ARGS = 'NUM_ARGS'
     NUM_RESULTS = 'NUM_RESULTS'
@@ -11,6 +7,12 @@ class IntCode:
     MODE_POSITION = 0
 
     memory = []
+    position = 0
+    input_stream = []
+    output_stream = []
+
+    pause_flag = False
+    pause_on_input = False
 
     def value(self, arg):
         par = arg[0]
@@ -38,11 +40,20 @@ class IntCode:
 
     def op_input(self, args):
         arg = args[0][0]
-        value = input('>>> ')
+        if self.input_stream is None or len(self.input_stream) == 0:
+            if self.pause_on_input:
+                self.pause_flag = True
+                return
+            value = input('>>> ')
+        else:
+            value = self.input_stream.pop(0)
         self.memory[arg] = int(value)
 
     def op_output(self, args):
-        print('<<< ', self.value((args[0])))
+        if self.output_stream is None:
+            print('<<< ', self.value((args[0])))
+        else:
+            self.output_stream.append(self.value((args[0])))
 
     def op_jump_if_true(self, args):
         args = [self.value(x) for x in args]
@@ -93,20 +104,47 @@ class IntCode:
             modes = int(modes/10)
         return op, flags
 
-    def run(self, program):
-        self.memory = program
-        pos = 0
+    def run(self, program, input_stream = None, output_stream = None, pause_on_input = False):
+        self.pause_on_input = pause_on_input
+        if not self.pause_flag:
+            self.memory = program.copy()
+            self.position = 0
+        self.input_stream = input_stream
+        self.output_stream = output_stream
+        self.pause_flag = False
         while True:
-            opcode = self.memory[pos]
+            opcode = self.memory[self.position]
             if opcode == 99:
                 break
             op, flags = self.parse_opcode(opcode)
             args = []
             for i in range(self.operations[op][IntCode.NUM_ARGS]):
-                args.append((self.memory[pos+1+i], flags[i]))
+                args.append((self.memory[self.position+1+i], flags[i]))
             res = self.operations[op][IntCode.METHOD](self, args)
+            if self.pause_flag:
+                break
             if res is not None:
-                pos = res
+                self.position = res
             else:
-                pos += self.operations[op][IntCode.NUM_ARGS] + 1
-        return self.memory
+                self.position += self.operations[op][IntCode.NUM_ARGS] + 1
+        return self.memory, self.pause_flag
+
+    def run_chain(self, num_computers, init_values, program, input_stream, output_stream):
+        inp_stream = [init_values[0]] + input_stream
+        comps = []
+        for x in range(num_computers):
+            comps.append(IntCode())
+        first_run = True
+        while True:
+            for x in range(num_computers):
+                out_stream = []
+                mem, paused = comps[x].run(program, inp_stream, out_stream, True)
+                if x == num_computers-1 and not paused:
+                    output_stream += out_stream
+                    return
+                else:
+                    if first_run and x != num_computers-1:
+                        inp_stream = [init_values[x+1]] + out_stream
+                    else:
+                        inp_stream = out_stream
+            first_run = False
